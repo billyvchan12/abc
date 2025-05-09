@@ -1502,7 +1502,11 @@ inline std::vector<vivify_ref> &current_refs_schedule (Vivifier &vivifier) {
     break;
   }
 #ifdef WIN32
-  __assume(false);
+    #ifdef __MINGW32__
+            __builtin_unreachable ();
+    #else
+            __assume(false);
+    #endif
 #else
   __builtin_unreachable ();
 #endif
