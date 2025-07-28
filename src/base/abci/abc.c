@@ -11281,6 +11281,7 @@ int Abc_CommandMiter( Abc_Frame_t * pAbc, int argc, char ** argv )
     int nPartSize;
     int fTrans;
     int fIgnoreNames;
+    int fDestructive;
 
     pNtk = Abc_FrameReadNtk(pAbc);
 
@@ -11292,8 +11293,9 @@ int Abc_CommandMiter( Abc_Frame_t * pAbc, int argc, char ** argv )
     nPartSize = 0;
     fTrans = 0;
     fIgnoreNames = 0;
+    fDestructive = 0;
     Extra_UtilGetoptReset();
-    while ( ( c = Extra_UtilGetopt( argc, argv, "Pcmitnh" ) ) != EOF )
+    while ( ( c = Extra_UtilGetopt( argc, argv, "Pcmitndh" ) ) != EOF )
     {
         switch ( c )
         {
@@ -11323,6 +11325,9 @@ int Abc_CommandMiter( Abc_Frame_t * pAbc, int argc, char ** argv )
         case 'n':
             fIgnoreNames ^= 1;
             break;
+        case 'd':
+            fDestructive ^= 1;
+            break;
         default:
             goto usage;
         }
@@ -11344,7 +11349,7 @@ int Abc_CommandMiter( Abc_Frame_t * pAbc, int argc, char ** argv )
 
     pArgvNew = argv + globalUtilOptind;
     nArgcNew = argc - globalUtilOptind;
-    if ( !Abc_NtkPrepareTwoNtks( stdout, pNtk, pArgvNew, nArgcNew, &pNtk1, &pNtk2, &fDelete1, &fDelete2, 1 ) )
+    if ( !Abc_NtkPrepareTwoNtksFull( stdout, pAbc, pNtk, pArgvNew, nArgcNew, &pNtk1, &pNtk2, &fDelete1, &fDelete2, 1, fDestructive ) )
         return 1;
 
     if ( fIgnoreNames )
@@ -11390,6 +11395,7 @@ usage:
     Abc_Print( -2, "\t-m       : toggles creating multi-output miter [default = %s]\n", fMulti? "yes": "no" );
     Abc_Print( -2, "\t-t       : toggle XORing pair-wise POs of the miter [default = %s]\n", fTrans? "yes": "no" );
     Abc_Print( -2, "\t-n       : toggle ignoring names when matching CIs/COs [default = %s]\n", fIgnoreNames? "yes": "no" );
+    Abc_Print( -2, "\t-d       : use current network in-place to construct miter, cannot reuse the network afterwards [default = %s]\n", fDestructive? "yes": "no" );
     Abc_Print( -2, "\t-h       : print the command usage\n");
     Abc_Print( -2, "\tfile1    : (optional) the file with the first network\n");
     Abc_Print( -2, "\tfile2    : (optional) the file with the second network\n");
@@ -16311,8 +16317,7 @@ int Abc_CommandTest( Abc_Frame_t * pAbc, int argc, char ** argv )
     //Gyx_ProblemSolveTest();
 /*
     {
-        extern Abc_Ntk_t * Abc_NtkFromArray();
-        Abc_Ntk_t * pNtkRes = Abc_NtkFromArray();
+        Abc_Ntk_t * pNtkRes = Abc_NtkFromArray(0);
         Abc_FrameReplaceCurrentNetwork( pAbc, pNtkRes );
     }
 */
@@ -25544,7 +25549,7 @@ int Abc_CommandSim3( Abc_Frame_t * pAbc, int argc, char ** argv )
     int c;
     Ssw_RarSetDefaultParams( pPars );
     Extra_UtilGetoptReset();
-    while ( ( c = Extra_UtilGetopt( argc, argv, "FWBRSNTGLadivzh" ) ) != EOF )
+    while ( ( c = Extra_UtilGetopt( argc, argv, "FWBRSNTGLadivzhq" ) ) != EOF )
     {
         switch ( c )
         {
@@ -25659,6 +25664,9 @@ int Abc_CommandSim3( Abc_Frame_t * pAbc, int argc, char ** argv )
             break;
         case 'z':
             pPars->fNotVerbose ^= 1;
+            break;
+        case 'q':
+            pPars->fSilent ^= 1;
             break;
         case 'h':
             goto usage;
@@ -33605,8 +33613,9 @@ int Abc_CommandAbc9Get( Abc_Frame_t * pAbc, int argc, char ** argv )
     Gia_Man_t * pGia, * pTemp;
     char * pInits;
     int c, fGiaSimple = 0, fMapped = 0, fNames = 0, fVerbose = 0;
+    int fDestroy = 0;
     Extra_UtilGetoptReset();
-    while ( ( c = Extra_UtilGetopt( argc, argv, "cmnvh" ) ) != EOF )
+    while ( ( c = Extra_UtilGetopt( argc, argv, "cmndvh" ) ) != EOF )
     {
         switch ( c )
         {
@@ -33618,6 +33627,9 @@ int Abc_CommandAbc9Get( Abc_Frame_t * pAbc, int argc, char ** argv )
             break;
         case 'n':
             fNames ^= 1;
+            break;
+        case 'd':
+            fDestroy ^= 1;
             break;
         case 'v':
             fVerbose ^= 1;
@@ -33682,16 +33694,28 @@ int Abc_CommandAbc9Get( Abc_Frame_t * pAbc, int argc, char ** argv )
         pGia->And2Delay = pNtk->AndGateDelay;
     }
     Abc_FrameUpdateGia( pAbc, pGia );
+    // destroy the ntk, save memory
+    if ( fDestroy )
+    {
+        Abc_Ntk_t* pNtkToDelete = pAbc->pNtkCur;
+        while ( pNtkToDelete ) {
+            Abc_Ntk_t* pNtkBackup = Abc_NtkBackup( pNtkToDelete );
+            Abc_NtkDelete( pNtkToDelete );
+            pNtkToDelete = pNtkBackup;
+        }
+        pAbc->pNtkCur = NULL;
+    }
     return 0;
 
 usage:
-    Abc_Print( -2, "usage: &get [-cmnvh] <file>\n" );
+    Abc_Print( -2, "usage: &get [-cmndvh] <file>\n" );
     Abc_Print( -2, "\t         converts the current network into GIA and moves it to the &-space\n" );
     Abc_Print( -2, "\t         (if the network is a sequential logic network, normalizes the flops\n" );
     Abc_Print( -2, "\t         to have const-0 initial values, equivalent to \"undc; st; zero\")\n" );
     Abc_Print( -2, "\t-c     : toggles allowing simple GIA to be imported [default = %s]\n", fGiaSimple? "yes": "no" );
     Abc_Print( -2, "\t-m     : toggles preserving the current mapping [default = %s]\n", fMapped? "yes": "no" );
     Abc_Print( -2, "\t-n     : toggles saving CI/CO names of the AIG [default = %s]\n", fNames? "yes": "no" );
+    Abc_Print( -2, "\t-d     : Delete current network after conversion [default = %s]\n", fDestroy? "yes": "no" );
     Abc_Print( -2, "\t-v     : toggles additional verbose output [default = %s]\n", fVerbose? "yes": "no" );
     Abc_Print( -2, "\t-h     : print the command usage\n");
     Abc_Print( -2, "\t<file> : the file name\n");
@@ -33945,6 +33969,83 @@ static inline int Gia_ManCompareWithBest( Gia_Man_t * pBest, Gia_Man_t * p, int 
     return 0;
 }
 
+static inline int Gia_ManCompareWithBest2( Gia_Man_t * pBest, Gia_Man_t * p, int * pnBestLuts, int * pnBestEdges, int * pnBestLevels, int fArea )
+{
+    int nCurLuts, nCurEdges, nCurLevels;
+    Gia_ManLutParams( p, &nCurLuts, &nCurEdges, &nCurLevels );
+	int update = 0;
+    if ( pBest == NULL ||
+         Gia_ManPiNum(pBest) != Gia_ManPiNum(p) ||
+         Gia_ManPoNum(pBest) != Gia_ManPoNum(p) ||
+         Gia_ManRegNum(pBest) != Gia_ManRegNum(p) ||
+         strcmp(Gia_ManName(pBest), Gia_ManName(p)) )
+		update = 1;
+	else if (!fArea) {
+		if (*pnBestLevels > nCurLevels || (*pnBestLevels == nCurLevels && 2*(*pnBestLuts) + *pnBestEdges > 2*nCurLuts + nCurEdges))
+		update = 1;
+	}
+	else if (fArea==1) {
+		if (*pnBestLuts   > nCurLuts   || (*pnBestLuts   == nCurLuts   && *pnBestLevels > nCurLevels))
+			update = 1;
+	}
+	else if (fArea==2) {
+        int bestLutEdge = 2*(*pnBestLuts)+*pnBestEdges;
+        int curLutEdge = 2*nCurLuts + nCurEdges;
+
+        if (bestLutEdge > curLutEdge || (bestLutEdge == curLutEdge && *pnBestLevels > nCurLevels))
+			update = 1;
+	}
+	else if (fArea==8) {
+        // printf("\nbestlevel %d bestlut %d, curlevel %d, curlut %d\n", *pnBestLevels, *pnBestLuts, nCurLevels,  nCurLuts);
+        float r_area = (float)nCurLuts / *pnBestLuts;
+        float r_level = (float)nCurLevels / *pnBestLevels;
+		float r_edge = (float)nCurEdges / *pnBestEdges;
+
+        if (r_area < 1.02 && r_level < 1.2) {
+            if (r_area < 1 || r_level < 1)
+                update = 1;
+        }
+
+        // printf("\nr_area %f vs. r_level %f, update %d\n", r_area, r_level, update);
+    }
+	else if (fArea==9) {
+        float r_area = (float)nCurLuts / *pnBestLuts;
+        float r_level = (float)nCurLevels / *pnBestLevels;
+        if (*pnBestLevels > nCurLevels) {
+            if (r_area < 5*r_level)
+                update = 1;
+        } else if (*pnBestLevels == nCurLevels && 2*(*pnBestLuts) + *pnBestEdges > 2*nCurLuts + nCurEdges) {
+            update = 1;
+        } 
+    }
+    else 
+        {
+		// fArea != 0 or 1, custom cost function
+		int a, l, e; // coef of area, level and edge
+		l=3; a=3; e=4; // total = 10
+
+		if (fArea == 2) { l = 5; a = 2; e = 3; } 
+		else if (fArea == 3) { l = 2; a = 5; e = 3; }
+
+		float r_area = (float)nCurLuts / *pnBestLuts;
+		float r_edge = (float)nCurEdges / *pnBestEdges;
+		float r_level = (float)nCurLevels / *pnBestLevels;
+		float total = a*r_area + l*r_level + e*r_edge;
+
+		if (total < 10.0) update = 1;
+	}
+
+	if (update) {
+        *pnBestLuts = nCurLuts;
+        *pnBestEdges = nCurEdges;
+        *pnBestLevels = nCurLevels;
+        //printf( "\nUpdating best (%d %d %d).\n\n", nCurLuts, nCurEdges, nCurLevels );
+        return 1;
+    }
+    return 0;
+}
+
+
 /**Function*************************************************************
 
   Synopsis    []
@@ -33965,7 +34066,12 @@ int Abc_CommandAbc9Save( Abc_Frame_t * pAbc, int argc, char ** argv )
         switch ( c )
         {
         case 'a':
-            fArea ^= 1;
+	         if ( globalUtilOptind >= argc ) {
+                fArea ^= 1; 
+             } else {
+                fArea = atoi(argv[globalUtilOptind]);
+                globalUtilOptind++;
+             }
             break;
         case 'h':
             goto usage;
@@ -33983,7 +34089,7 @@ int Abc_CommandAbc9Save( Abc_Frame_t * pAbc, int argc, char ** argv )
         Abc_Print( -1, "GIA has no mapping.\n" );
         return 1;
     }
-    if ( !Gia_ManCompareWithBest( pAbc->pGiaBest, pAbc->pGia, &pAbc->nBestLuts, &pAbc->nBestEdges, &pAbc->nBestLevels, fArea ) )
+    if ( !Gia_ManCompareWithBest2( pAbc->pGiaBest, pAbc->pGia, &pAbc->nBestLuts, &pAbc->nBestEdges, &pAbc->nBestLevels, fArea ) )
         return 0;
     // save the design as best
     Gia_ManStopP( &pAbc->pGiaBest );
@@ -34018,7 +34124,12 @@ int Abc_CommandAbc9Save2( Abc_Frame_t * pAbc, int argc, char ** argv )
         switch ( c )
         {
         case 'a':
-            fArea ^= 1;
+ 	        if ( globalUtilOptind >= argc ) {
+               fArea ^= 1; 
+            } else {
+               fArea = atoi(argv[globalUtilOptind]);
+               globalUtilOptind++;
+            }
             break;
         case 'h':
             goto usage;
@@ -34036,7 +34147,9 @@ int Abc_CommandAbc9Save2( Abc_Frame_t * pAbc, int argc, char ** argv )
         Abc_Print( -1, "GIA has no mapping.\n" );
         return 1;
     }
-    if ( !Gia_ManCompareWithBest( pAbc->pGiaBest2, pAbc->pGia, &pAbc->nBestLuts2, &pAbc->nBestEdges2, &pAbc->nBestLevels2, fArea ) )
+    // if ( !Gia_ManCompareWithBest( pAbc->pGiaBest2, pAbc->pGia, &pAbc->nBestLuts2, &pAbc->nBestEdges2, &pAbc->nBestLevels2, fArea ) )
+    // support more variation of -a <n>
+    if ( !Gia_ManCompareWithBest2( pAbc->pGiaBest2, pAbc->pGia, &pAbc->nBestLuts2, &pAbc->nBestEdges2, &pAbc->nBestLevels2, fArea ) )
         return 0;
     // save the design as best
     Gia_ManStopP( &pAbc->pGiaBest2 );
@@ -34185,11 +34298,14 @@ int Abc_CommandAbc9Load2( Abc_Frame_t * pAbc, int argc, char ** argv )
         return 1;
     }
     Gia_ManStopP( &pAbc->pGia );
+    pAbc->pGia = Gia_ManDupWithAttributes( pAbc->pGiaBest2 );
+    /*
     pAbc->pGia = pAbc->pGiaBest2;
     pAbc->pGiaBest2 = NULL;
     pAbc->nBestLuts2 = 0;
     pAbc->nBestEdges2 = 0;
     pAbc->nBestLevels2 = 0;
+    */
     return 0;
 
 usage:
@@ -39372,8 +39488,9 @@ int Abc_CommandAbc9Syn4( Abc_Frame_t * pAbc, int argc, char ** argv )
     Gia_Man_t * pTemp;
     int c, fVerbose = 0;
     int fVeryVerbose = 0;
+    int fCover=7;
     Extra_UtilGetoptReset();
-    while ( ( c = Extra_UtilGetopt( argc, argv, "vwh" ) ) != EOF )
+    while ( ( c = Extra_UtilGetopt( argc, argv, "vwfh" ) ) != EOF )
     {
         switch ( c )
         {
@@ -39382,6 +39499,15 @@ int Abc_CommandAbc9Syn4( Abc_Frame_t * pAbc, int argc, char ** argv )
             break;
         case 'w':
             fVeryVerbose ^= 1;
+            break;
+        case 'f':
+            if ( globalUtilOptind >= argc )
+            {
+                Abc_Print( -1, "Command line switch \"-h\" should be followed by an integer.\n" );
+                goto usage;
+            }
+            fCover = atoi(argv[globalUtilOptind]);
+            globalUtilOptind++;
             break;
         case 'h':
             goto usage;
@@ -39394,15 +39520,16 @@ int Abc_CommandAbc9Syn4( Abc_Frame_t * pAbc, int argc, char ** argv )
         Abc_Print( -1, "Abc_CommandAbc9Syn4(): There is no AIG.\n" );
         return 1;
     }
-    pTemp = Gia_ManAigSyn4( pAbc->pGia, fVerbose, fVeryVerbose );
+    pTemp = Gia_ManAigSyn4( pAbc->pGia, fCover, fVerbose, fVeryVerbose );
     Abc_FrameUpdateGia( pAbc, pTemp );
     return 0;
 
 usage:
-    Abc_Print( -2, "usage: &syn4 [-lvh]\n" );
+    Abc_Print( -2, "usage: &syn4 [-vwfh]\n" );
     Abc_Print( -2, "\t         performs AIG optimization\n" );
     Abc_Print( -2, "\t-v     : toggle printing verbose information [default = %s]\n", fVerbose? "yes": "no" );
     Abc_Print( -2, "\t-w     : toggle printing additional information [default = %s]\n", fVeryVerbose? "yes": "no" );
+    Abc_Print( -2, "\t-f     : use different size cover in divider extraction [default = %s]\n", fCover? "yes": "no" );
     Abc_Print( -2, "\t-h     : print the command usage\n");
     return 1;
 }
@@ -42661,15 +42788,19 @@ usage:
 ***********************************************************************/
 int Abc_CommandAbc9Flow2( Abc_Frame_t * pAbc, int argc, char ** argv )
 {
-    extern void Gia_ManPerformFlow2( int fIsMapped, int nAnds, int nLevels, int nLutSize, int nCutNum, int fBalance, int fMinAve, int fUseMfs, int fVerbose );
+    extern void Gia_ManPerformFlow2( int fIsMapped, int nAnds, int nLevels, int nLutSize, int nCutNum, int fBalance, int fMinAve, int fUseMfs, int nEfxOpt, int fPower, int fArea, int fUseSave, int fVerbose );
     int nLutSize    =  6;
     int nCutNum     =  8;
+	int nEfxOpt		=  0;
+    int fPower      =  0;
+    int fArea       =  0;
+    int fUseSave    =  0;
     int fBalance    =  0;
     int fMinAve     =  0;
     int fUseMfs     =  0;
     int c, fVerbose =  0;
     Extra_UtilGetoptReset();
-    while ( ( c = Extra_UtilGetopt( argc, argv, "KCbtmvh" ) ) != EOF )
+    while ( ( c = Extra_UtilGetopt( argc, argv, "KCXbtmvhaps" ) ) != EOF )
     {
         switch ( c )
         {
@@ -42695,6 +42826,17 @@ int Abc_CommandAbc9Flow2( Abc_Frame_t * pAbc, int argc, char ** argv )
             if ( nCutNum < 0 )
                 goto usage;
             break;
+        case 'X':
+            if ( globalUtilOptind >= argc )
+            {
+                Abc_Print( -1, "Command line switch \"-X\" should be followed by an integer.\n" );
+                goto usage;
+            }
+            nEfxOpt = atoi(argv[globalUtilOptind]);
+            globalUtilOptind++;
+            if ( nEfxOpt < 0 )
+                goto usage;
+            break;
         case 'b':
             fBalance ^= 1;
             break;
@@ -42703,6 +42845,20 @@ int Abc_CommandAbc9Flow2( Abc_Frame_t * pAbc, int argc, char ** argv )
             break;
         case 'm':
             fUseMfs ^= 1;
+            break;
+        case 'p':
+            fPower ^= 1;
+            break;
+        case 's':
+            fUseSave ^= 1;
+            break;
+        case 'a':
+ 	        if ( globalUtilOptind >= argc ) {
+                fArea ^= 1; 
+            } else {
+                fArea = atoi(argv[globalUtilOptind]);
+                globalUtilOptind++;
+            }
             break;
         case 'v':
             fVerbose ^= 1;
@@ -42718,7 +42874,7 @@ int Abc_CommandAbc9Flow2( Abc_Frame_t * pAbc, int argc, char ** argv )
         Abc_Print( -1, "Abc_CommandAbc9Flow2(): There is no AIG.\n" );
         return 1;
     }
-    Gia_ManPerformFlow2( Gia_ManHasMapping(pAbc->pGia), Gia_ManAndNum(pAbc->pGia), Gia_ManLevelNum(pAbc->pGia), nLutSize, nCutNum, fBalance, fMinAve, fUseMfs, fVerbose );
+    Gia_ManPerformFlow2( Gia_ManHasMapping(pAbc->pGia), Gia_ManAndNum(pAbc->pGia), Gia_ManLevelNum(pAbc->pGia), nLutSize, nCutNum, fBalance, fMinAve, fUseMfs, nEfxOpt, fPower, fArea, fUseSave, fVerbose );
     return 0;
 
 usage:
@@ -42747,16 +42903,20 @@ usage:
 ***********************************************************************/
 int Abc_CommandAbc9Flow3( Abc_Frame_t * pAbc, int argc, char ** argv )
 {
-    extern void Gia_ManPerformFlow3( int nLutSize, int nCutNum, int fBalance, int fMinAve, int fUseMfs, int fUseLutLib, int fVerbose );
+    extern void Gia_ManPerformFlow3( int nLutSize, int nCutNum, int fBalance, int fMinAve, int fUseMfs, int fUseLutLib, int nEfxOpt, int fPower, int fArea, int fUseSave, int fVerbose );
     int nLutSize    =  6;
     int nCutNum     =  8;
+	int nEfxOpt		=  0;
     int fBalance    =  0;
     int fMinAve     =  0;
     int fUseMfs     =  1;
+    int fPower      =  0;
+    int fArea       =  0;
+    int fUseSave    =  0;
     int fUseLutLib  =  0;
     int c, fVerbose =  0;
     Extra_UtilGetoptReset();
-    while ( ( c = Extra_UtilGetopt( argc, argv, "KCbtmlvh" ) ) != EOF )
+    while ( ( c = Extra_UtilGetopt( argc, argv, "KCXbtmalvhfps" ) ) != EOF )
     {
         switch ( c )
         {
@@ -42782,6 +42942,17 @@ int Abc_CommandAbc9Flow3( Abc_Frame_t * pAbc, int argc, char ** argv )
             if ( nCutNum < 0 )
                 goto usage;
             break;
+         case 'X':
+            if ( globalUtilOptind >= argc )
+            {
+                Abc_Print( -1, "Command line switch \"-X\" should be followed by an integer.\n" );
+                goto usage;
+            }
+            nEfxOpt = atoi(argv[globalUtilOptind]);
+            globalUtilOptind++;
+            if ( nEfxOpt < 0 )
+                goto usage;
+            break;
         case 'b':
             fBalance ^= 1;
             break;
@@ -42790,6 +42961,20 @@ int Abc_CommandAbc9Flow3( Abc_Frame_t * pAbc, int argc, char ** argv )
             break;
         case 'm':
             fUseMfs ^= 1;
+            break;
+        case 'p':
+            fPower ^= 1;
+            break;
+        case 's':
+            fUseSave ^= 1;
+            break;
+        case 'a':
+   	        if ( globalUtilOptind >= argc ) {
+                fArea ^= 1; 
+            } else {
+                fArea = atoi(argv[globalUtilOptind]);
+                globalUtilOptind++;
+            }
             break;
         case 'l':
             fUseLutLib ^= 1;
@@ -42813,7 +42998,7 @@ int Abc_CommandAbc9Flow3( Abc_Frame_t * pAbc, int argc, char ** argv )
         Abc_Print( -1, "Abc_CommandAbc9Flow3(): Please enter LUT library using \'read_lut\'.\n" );
         return 1;
     }
-    Gia_ManPerformFlow3( nLutSize, nCutNum, fBalance, fMinAve, fUseMfs, fUseLutLib, fVerbose );
+    Gia_ManPerformFlow3( nLutSize, nCutNum, fBalance, fMinAve, fUseMfs, fUseLutLib, nEfxOpt, fPower, fArea, fUseSave, fVerbose );
     return 0;
 
 usage:

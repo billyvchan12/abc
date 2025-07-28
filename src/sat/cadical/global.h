@@ -16,6 +16,10 @@
 #define CADICAL_assert(cond) assert(cond)
 #endif
 
+#ifdef __MINGW32__
+#define WIN32
+#endif
+
 #include "misc/util/abc_global.h"
 
 #endif

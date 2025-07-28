@@ -1286,7 +1286,7 @@ extern Gia_Man_t *         Gia_ManBalance( Gia_Man_t * p, int fSimpleAnd, int fS
 extern Gia_Man_t *         Gia_ManAreaBalance( Gia_Man_t * p, int fSimpleAnd, int nNewNodesMax, int fVerbose, int fVeryVerbose );
 extern Gia_Man_t *         Gia_ManAigSyn2( Gia_Man_t * p, int fOldAlgo, int fCoarsen, int fCutMin, int nRelaxRatio, int fDelayMin, int fVerbose, int fVeryVerbose );
 extern Gia_Man_t *         Gia_ManAigSyn3( Gia_Man_t * p, int fVerbose, int fVeryVerbose );
-extern Gia_Man_t *         Gia_ManAigSyn4( Gia_Man_t * p, int fVerbose, int fVeryVerbose );
+extern Gia_Man_t *         Gia_ManAigSyn4( Gia_Man_t * p, int fCover, int fVerbose, int fVeryVerbose );
 /*=== giaBidec.c ===========================================================*/
 extern unsigned *          Gia_ManConvertAigToTruth( Gia_Man_t * p, Gia_Obj_t * pRoot, Vec_Int_t * vLeaves, Vec_Int_t * vTruth, Vec_Int_t * vVisited );
 extern Gia_Man_t *         Gia_ManPerformBidec( Gia_Man_t * p, int fVerbose );
@@ -1513,8 +1513,8 @@ extern int                 Gia_ManHashAndMulti( Gia_Man_t * p, Vec_Int_t * vLits
 extern int                 Gia_ManHashAndMulti2( Gia_Man_t * p, Vec_Int_t * vLits );
 extern int                 Gia_ManHashDualMiter( Gia_Man_t * p, Vec_Int_t * vOuts );
 /*=== giaIf.c ===========================================================*/
+extern void                Gia_ManPrintMappingStats( Gia_Man_t * p, char * pDumpFile, unsigned fNoColor );
 extern void                Gia_ManPrintOutputLutStats( Gia_Man_t * p );
-extern void                Gia_ManPrintMappingStats( Gia_Man_t * p, char * pDumpFile );
 extern void                Gia_ManPrintPackingStats( Gia_Man_t * p );
 extern void                Gia_ManPrintLutStats( Gia_Man_t * p );
 extern int                 Gia_ManLutFaninCount( Gia_Man_t * p );
