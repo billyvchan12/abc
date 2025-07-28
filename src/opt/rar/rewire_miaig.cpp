@@ -21,22 +21,25 @@
 #include "rewire_rar.h"
 #include "rewire_miaig.h"
 
+#define USE_OLD_LEVEL_SORTING 0
+
 #ifdef RW_ABC
 ABC_NAMESPACE_IMPL_START
 #endif // RW_ABC
 
 #ifdef RW_ABC
-Gia_Man_t *Gia_ManRewireInt(Gia_Man_t *pGia, Gia_Man_t *pExc, int nIters, float levelGrowRatio, int nExpands, int nGrowth, int nDivs, int nFaninMax, int nTimeOut, int nMode, int nMappedMode, int nDist, int nSeed, int fCheck, int fVerbose) {
+Gia_Man_t *Gia_ManRewireInt(Gia_Man_t *pGia, Gia_Man_t *pExc, int nIters, float levelGrowRatio, int nExpands, int nGrowth, int nDivs, int nFaninMax, int nTimeOut, int nMode, int nMappedMode, int nDist, int nSeed, int fCheck, int fChoices, int fVerbose) {
     Random_Num(nSeed == 0 ? Abc_Random(0) % 10 : nSeed);
+    Gia_ChMan_t *pChMan = fChoices ? Gia_ManDupChoicesStart(pGia) : NULL;
 
     assert(Gia_ManCiNum(pGia) <= 58);
     Rewire::Miaig pNtkMiaig(pGia);
     if (pExc)
         pNtkMiaig.setExc(pExc);
-    Rewire::Miaig pNew = pNtkMiaig.rewire(nIters, levelGrowRatio, nExpands, nGrowth, nDivs, nFaninMax, nTimeOut, nMode, nMappedMode, nDist, fCheck, fVerbose);
+    Rewire::Miaig pNew = pNtkMiaig.rewire(nIters, levelGrowRatio, nExpands, nGrowth, nDivs, nFaninMax, nTimeOut, nMode, nMappedMode, nDist, fCheck, pChMan, fVerbose);
     pNew.setName(Gia_ManName(pGia));
 
-    return pNew.toGia();
+    return pChMan ? Gia_ManDupChoicesFinish(pChMan) : pNew.toGia();
 }
 
 Abc_Ntk_t *Abc_ManRewireInt(Abc_Ntk_t *pNtk, Gia_Man_t *pExc, int nIters, float levelGrowRatio, int nExpands, int nGrowth, int nDivs, int nFaninMax, int nTimeOut, int nMode, int nMappedMode, int nDist, int nSeed, int fCheck, int fVerbose) {
@@ -47,7 +50,7 @@ Abc_Ntk_t *Abc_ManRewireInt(Abc_Ntk_t *pNtk, Gia_Man_t *pExc, int nIters, float 
     Rewire::Miaig pNtkMiaig(pNtk);
     if (pExc)
         pNtkMiaig.setExc(pExc);
-    Rewire::Miaig pNew = pNtkMiaig.rewire(nIters, levelGrowRatio, nExpands, nGrowth, nDivs, nFaninMax, nTimeOut, fMapped, nMappedMode, nDist, fCheck, fVerbose);
+    Rewire::Miaig pNew = pNtkMiaig.rewire(nIters, levelGrowRatio, nExpands, nGrowth, nDivs, nFaninMax, nTimeOut, fMapped, nMappedMode, nDist, fCheck, NULL, fVerbose);
     pNew.setName(Abc_NtkName(pNtk));
     if (nMode > 0) {
         pNew.countTransistors(1, nMappedMode);
@@ -63,7 +66,7 @@ Mini_Aig_t *MiniAig_ManRewireInt(Mini_Aig_t *pAig, Gia_Man_t *pExc, int nIters, 
     Rewire::Miaig pNtkMiaig(pAig);
     if (pExc)
         pNtkMiaig.setExc(pExc);
-    Rewire::Miaig pNew = pNtkMiaig.rewire(nIters, levelGrowRatio, nExpands, nGrowth, nDivs, nFaninMax, nTimeOut, nMode, nMappedMode, nDist, fCheck, fVerbose);
+    Rewire::Miaig pNew = pNtkMiaig.rewire(nIters, levelGrowRatio, nExpands, nGrowth, nDivs, nFaninMax, nTimeOut, nMode, nMappedMode, nDist, fCheck, NULL, fVerbose);
 
     return pNew.toMiniAig();
 }
@@ -104,7 +107,11 @@ void Miaig::setName(char *pName) {
         if (_data->pName) {
             free(_data->pName);
         }
-        _data->pName = strdup(pName);
+        if (pName == NULL || pName[0] == '\0') {
+            _data->pName = strdup("rewire_miaig");
+        } else {
+            _data->pName = strdup(pName);
+        }
     }
 }
 
@@ -1030,12 +1037,35 @@ int Miaig::expandOne(int iObj, int nAddedMax, int nDist, int nExpandableLevel, w
     std::stable_sort(pOrderF, pOrderF + Vi_Size(_data->vOrderF), [&](int a, int b) {
         return objLevel(Rw_Lit2Var(a)) > objLevel(Rw_Lit2Var(b));
     });
+#if USE_OLD_LEVEL_SORTING
     std::stable_sort(pOrderF, pOrderF + Vi_Size(_data->vOrderF), [&](int a, int b) {
         if (objLevel(Rw_Lit2Var(a)) == 0 || objLevel(Rw_Lit2Var(b)) == 0) {
             return false;
         }
         return objRef(Rw_Lit2Var(a)) < objRef(Rw_Lit2Var(b));
     });
+#else
+   // Sort all literals by objRef except in the case where they refer to a variable on level zero.
+   // Level zero literals are always sorted before non-level zero literals. Two level zero literals are ordered by their
+   // objRef to maintain strict weak ordering.
+    std::stable_sort(pOrderF, pOrderF + Vi_Size(_data->vOrderF), [&](int a, int b) {
+     bool a_is_level_0 = (objLevel(Rw_Lit2Var(a)) == 0);
+     bool b_is_level_0 = (objLevel(Rw_Lit2Var(b)) == 0);
+
+     // Always sort level 0 literals before the rest.
+     if (a_is_level_0 && !b_is_level_0) {
+         return true; // a (level 0) comes before b (non-level 0)
+     }
+     if (!a_is_level_0 && b_is_level_0) {
+         return false; // b (level 0) comes before a (non-level 0)
+     }        
+
+     // If both are level 0 or none are level 0, then sort by objRef. 
+     // If both are level 0 the relative ordering (probably?) doesn't matter, 
+     // so we can just order them anyway by objRef such that we maintain the strict weak ordering.
+     return objRef(Rw_Lit2Var(a)) < objRef(Rw_Lit2Var(b));
+    });
+#endif
 
     // iterate through candidate fanins (nodes that are not in the TFO of iObj)
     Vi_ForEachEntry(_data->vOrderF, i, k) {
@@ -1092,12 +1122,36 @@ int Miaig::reduceOne(int iObj, int fOnlyConst, int fOnlyBuffer, int fHeuristic, 
         std::stable_sort(pOrderF, pOrderF + Vi_Size(_data->vOrderF), [&](int a, int b) {
             return objLevel(Rw_Lit2Var(a)) < objLevel(Rw_Lit2Var(b));
         });
+#if USE_OLD_LEVEL_SORTING
         std::stable_sort(pOrderF, pOrderF + Vi_Size(_data->vOrderF), [&](int a, int b) {
             if (objLevel(Rw_Lit2Var(a)) == 0 || objLevel(Rw_Lit2Var(b)) == 0) {
                 return false;
             }
             return objRef(Rw_Lit2Var(a)) > objRef(Rw_Lit2Var(b));
         });
+#else
+   // Sort all literals by objRef except in the case where they refer to a variable on level zero.
+   // Level zero literals are always sorted before non-level zero literals. Two level zero literals are ordered by their
+   // objRef to maintain strict weak ordering.
+    std::stable_sort(pOrderF, pOrderF + Vi_Size(_data->vOrderF), [&](int a, int b) {
+     bool a_is_level_0 = (objLevel(Rw_Lit2Var(a)) == 0);
+     bool b_is_level_0 = (objLevel(Rw_Lit2Var(b)) == 0);
+
+     // Always sort level 0 literals before the rest.
+     if (a_is_level_0 && !b_is_level_0) {
+         return true; // a (level 0) comes before b (non-level 0)
+     }
+     if (!a_is_level_0 && b_is_level_0) {
+         return false; // b (level 0) comes before a (non-level 0)
+     }        
+
+     // If both are level 0 or none are level 0, then sort by objRef. 
+     // If both are level 0 the relative ordering (probably?) doesn't matter, 
+     // so we can just order them anyway by objRef such that we maintain the strict weak ordering.
+     return objRef(Rw_Lit2Var(a)) < objRef(Rw_Lit2Var(b));
+    });
+#endif
+
     }
 
     assert(Vi_Size(_data->vOrderF) == nFans);
@@ -1210,7 +1264,12 @@ Miaig Miaig::expandShareReduce(int nFaninAddLimitAll, int nDivs, int nDist, int 
     return pNew;
 }
 
-void randomAddBest(std::vector<Miaig> &pBests, Miaig pNew, int nBestSave) {
+void randomAddBest(std::vector<Miaig> &pBests, Miaig pNew, int nBestSave, Gia_ChMan_t *pChMan) {
+    if ( pChMan ) {
+        Gia_Man_t * pGia = pNew.toGia();
+        Gia_ManDupChoicesAdd(pChMan, pGia);
+        Gia_ManStop( pGia );
+    }
     if (pBests.size() < nBestSave) {
         pBests.push_back(pNew);
     } else {
@@ -1228,7 +1287,7 @@ Miaig randomReadExcept(std::vector<Miaig> &pBests, Miaig &pExcept) {
     return (pBests[iNum] == pExcept) ? pBests[(iNum + 1) % pBests.size()] : pBests[iNum];
 }
 
-Miaig Miaig::rewire(int nIters, float levelGrowRatio, int nExpands, int nGrowth, int nDivs, int nFaninMax, int nTimeOut, int nMode, int nMappedMode, int nDist, int fCheck, int nVerbose) {
+Miaig Miaig::rewire(int nIters, float levelGrowRatio, int nExpands, int nGrowth, int nDivs, int nFaninMax, int nTimeOut, int nMode, int nMappedMode, int nDist, int fCheck, Gia_ChMan_t *pChMan, int nVerbose) {
     const int nRootSave = 8;
     const int nBestSave = 4;
     int nRestart = 5000;
@@ -1272,7 +1331,7 @@ Miaig Miaig::rewire(int nIters, float levelGrowRatio, int nExpands, int nGrowth,
             pBest = pNew.dup(0, fMapped), improved = 1;
             iterNotImproveAfterRestart = 0;
         } else if (PrevBest == newTarget) {
-            randomAddBest(pBests, pNew.dup(0), nBestSave);
+            randomAddBest(pBests, pNew.dup(0), nBestSave, pChMan);
         }
         // compare
         if (maxLevel ? pNew.countLevel() > maxLevel : 0) {
@@ -1288,7 +1347,7 @@ Miaig Miaig::rewire(int nIters, float levelGrowRatio, int nExpands, int nGrowth,
                 pRoots = {pNew};
             }
         } else if (rootTarget == newTarget) {
-            randomAddBest(pRoots, pNew, nRootSave);
+            randomAddBest(pRoots, pNew, nRootSave, pChMan);
         } else {
             pRoots = {pNew};
         }
